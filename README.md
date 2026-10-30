@@ -17,20 +17,25 @@ The configurations were run in **Central US** (`centralus`) in October 2026 with
 | Terraform support | **Yes.** Use `azurerm_mssql_managed_instance` with a `GP_*` SKU and `general_purpose_v2_enabled = true`. Next-gen isn't a separate SKU name. The argument is available from azurerm **4.68.0**, and `storage_iops` from **4.78.0**. Older provider versions can't deploy Next-gen. |
 | General Purpose vs. Business Critical | Next-gen is an upgrade to **General Purpose only**. There's no Next-gen Business Critical. azurerm rejects `BC_*` with `general_purpose_v2_enabled` at plan time. Billing still shows *General Purpose*. |
 | Zone redundancy | Next-gen GP with zone redundancy is supported by the service **in preview**. It needs Elastic SAN ZRS, so it's not available in every region with zone redundancy; Central US has it. **azurerm currently blocks this combination at plan time**, so deploy it with the **azapi** provider (scenario s04). |
-| Flexible memory | Not exposed by azurerm. Set `memorySizeInGB` through azapi if you need it. |
-| Changing IOPS after create | Works in place. If your environment has an Azure Policy that requires Entra-only authentication, see [Entra-only authentication](#entra-only-authentication). |
+| Flexible memory | Not exposed by azurerm. The azapi stack can send `memorySizeInGB` (scenario s06), but this is **untested**: premium-series quota wasn't available. |
+| Changing IOPS after create | Works in place, about 1–2 minutes per change, with and without zone redundancy. If your environment has an Azure Policy that requires Entra-only authentication, see [Entra-only authentication](#entra-only-authentication). |
+| Existing standard GP / BC instances | ⚠️ **azurerm 4.78.0+ can't plan or destroy non-Next-gen instances** after create or import. See [docs/azurerm-storage-iops-bug.md](docs/azurerm-storage-iops-bug.md). |
 
 ## Results
 
 | ID | Provider | Configuration | Result |
 |---|---|---|---|
-| s01 | azurerm | GP_Gen5 + Next-gen | ✅ Deployed. Default 768 IOPS (3 IOPS/GB × 256 GB). IOPS later changed in place to 1500 and 2000 |
+| s01 | azurerm | GP_Gen5 + Next-gen | ✅ Create → plan (no changes) → IOPS 768 → 1500 → plan → destroy, all clean. Default 768 IOPS (3 IOPS/GB × 256 GB) |
 | s02 | azurerm | BC_Gen5 + Next-gen | ❌ Plan fails, as expected: `general_purpose_v2_enabled cannot be set to true on Business Critical SKUs` |
 | s03 | azurerm | GP_Gen5 + Next-gen + zone redundant | ❌ Plan fails: `zone_redundant_enabled cannot be set to true when general_purpose_v2_enabled is true` |
-| s04 | azapi | GP_Gen5 + Next-gen + zone redundant | ✅ Deployed (preview), with zone-redundant backups |
-| s05 | azurerm | BC_Gen5 + zone redundant (no Next-gen) | ✅ Deployed. Comparison case |
+| s04 | azapi | GP_Gen5 + Next-gen + zone redundant | ✅ Create → plan (no changes) → IOPS 768 → 1500 → plan → destroy, all clean (preview), with zone-redundant backups |
+| s05 | azurerm | BC_Gen5 + zone redundant (no Next-gen) | ⚠️ Created, then plan and destroy fail: [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md) |
+| s06 | azapi | GP_G8IM + Next-gen + flexible memory (40 GB) | ⏸️ Not tested: no premium-series quota; create attempts returned 500 InternalServerError |
+| s07 | azurerm | GP_Gen5, standard (no Next-gen) | ⚠️ Created, then plan and destroy fail: same [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md) |
 
-Creating a Managed Instance can take several hours, so allow for that in pipeline timeouts.
+Provider version checks (`terraform validate`): azurerm 4.67.0 rejects `general_purpose_v2_enabled`, 4.68.0 accepts it; 4.77.0 rejects `storage_iops`, 4.78.0 accepts it.
+
+Create times in these runs: 2–2.5 hours for Next-gen GP and Business Critical, 7 minutes for standard GP. Destroy took about 20–25 minutes. Allow for that in pipeline timeouts.
 
 ## Entra-only authentication
 
@@ -54,7 +59,8 @@ tries to turn Entra-only authentication off first, which Azure rejects.
 
 ## Layout
 
-```
+```text
+docs/                      write-ups of issues found while testing
 modules/mi-network/        VNet + delegated subnet + NSG + route table (one per scenario)
 stacks/azurerm/            Managed Instance via azurerm_mssql_managed_instance
 stacks/azapi/              Managed Instance via the ARM API (azapi_resource), skipping azurerm's validation
@@ -82,6 +88,7 @@ Tips:
 - If a long `terraform apply` is interrupted, the Managed Instance keeps provisioning in Azure. Bring it back under Terraform with `terraform import` once it finishes.
 - In Git Bash on Windows, set `MSYS_NO_PATHCONV=1` before `terraform import`, or Git Bash rewrites the `/subscriptions/...` resource ID.
 - If s04 is rejected because of the API version, set `api_version` to a newer preview version in the tfvars.
+- s05 and s07 can't be destroyed normally because of the [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md); use the workaround described there.
 
 ## References
 - Next-gen General Purpose: https://learn.microsoft.com/azure/azure-sql/managed-instance/service-tiers-next-gen-general-purpose-use

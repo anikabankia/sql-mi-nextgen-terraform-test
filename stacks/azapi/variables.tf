@@ -58,6 +58,12 @@ variable "storage_iops" {
   default = null
 }
 
+variable "memory_size_in_gb" {
+  type        = number
+  description = "Flexible memory (Next-gen GP on premium-series hardware). Null keeps the default for the vCore count."
+  default     = null
+}
+
 variable "zone_redundant" {
   type    = bool
   default = true

@@ -68,7 +68,8 @@ resource "azapi_resource" "mi" {
         zoneRedundant                    = var.zone_redundant
         requestedBackupStorageRedundancy = var.backup_storage_redundancy
       },
-      var.storage_iops == null ? {} : { storageIOps = var.storage_iops }
+      var.storage_iops == null ? {} : { storageIOps = var.storage_iops },
+      var.memory_size_in_gb == null ? {} : { memorySizeInGB = var.memory_size_in_gb }
     )
   }
 
