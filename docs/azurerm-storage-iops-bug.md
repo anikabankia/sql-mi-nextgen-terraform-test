@@ -3,7 +3,7 @@
 **Affected:** `azurerm_mssql_managed_instance`, azurerm **4.78.0 and later** (tested through 5.12.0)
 **Affected instances:** standard General Purpose and Business Critical (anything with `general_purpose_v2_enabled = false`)
 **Not affected:** Next-gen General Purpose (`general_purpose_v2_enabled = true`)
-**Status:** to be reported upstream at [hashicorp/terraform-provider-azurerm](https://github.com/hashicorp/terraform-provider-azurerm/issues)
+**Status:** reported upstream as [hashicorp/terraform-provider-azurerm#33760](https://github.com/hashicorp/terraform-provider-azurerm/issues/33760)
 
 ## What happens
 

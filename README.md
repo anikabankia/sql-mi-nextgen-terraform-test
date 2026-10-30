@@ -5,6 +5,12 @@ Sample Terraform that answers two questions:
 1. **Does Terraform support the Next-gen General Purpose tier?**
 2. **Are there constraints around General Purpose vs. Business Critical, or zone redundancy?**
 
+> [!WARNING]
+> **azurerm bug found during testing:** with azurerm 4.78.0 and later, standard General Purpose and Business Critical
+> Managed Instances can't be planned or destroyed after create or import (`storage_iops` is stored as 0 and fails the provider's own validation).
+> Next-gen GP is not affected. Details, evidence and workaround: [docs/azurerm-storage-iops-bug.md](docs/azurerm-storage-iops-bug.md).
+> Reported upstream: [hashicorp/terraform-provider-azurerm#33760](https://github.com/hashicorp/terraform-provider-azurerm/issues/33760).
+
 The configurations were run in **Central US** (`centralus`) in October 2026 with Terraform 1.12.2, azurerm 5.11.0 and azapi 2.x.
 
 > **This is a validation sample, not a production module.** Each scenario creates its own resource group and VNet,
