@@ -1,67 +1,68 @@
-# azurerm bug: non-Next-gen Managed Instances can't be planned or destroyed
+# azurerm bug: `ignore_changes = [storage_iops]` breaks non-Next-gen Managed Instances
 
-**Affected:** `azurerm_mssql_managed_instance`, azurerm **4.78.0 and later** (tested through 5.12.0)
+**Affected:** `azurerm_mssql_managed_instance`, azurerm **4.78.0 and later** (tested through 5.12.0), **only when the configuration lists `storage_iops` in `lifecycle.ignore_changes`**
 **Affected instances:** standard General Purpose and Business Critical (anything with `general_purpose_v2_enabled = false`)
-**Not affected:** Next-gen General Purpose (`general_purpose_v2_enabled = true`)
+**Not affected:** Next-gen General Purpose (`general_purpose_v2_enabled = true`), and configurations that don't ignore `storage_iops`
 **Status:** reported upstream as [hashicorp/terraform-provider-azurerm#33760](https://github.com/hashicorp/terraform-provider-azurerm/issues/33760)
+
+> An earlier version of this page said every non-Next-gen instance was affected after create, import or a provider upgrade.
+> Tests s09 and s10 showed that only configurations with `storage_iops` in `ignore_changes` fail. This repo's own stack had that line, which is why s05 and s07 failed.
 
 ## What happens
 
-1. `terraform apply` creates a standard GP or Business Critical Managed Instance successfully.
-2. Every later `terraform plan` fails, and so does `terraform destroy`:
+With `storage_iops` in `ignore_changes`, a standard GP or Business Critical instance is created successfully, but every later `terraform plan` fails, and so does `terraform destroy`:
 
-   ```text
-   Error: `storage_iops` can only be set when `general_purpose_v2_enabled` is `true`
+```text
+Error: `storage_iops` can only be set when `general_purpose_v2_enabled` is `true`
+```
 
-     with azurerm_mssql_managed_instance.this,
-     on main.tf line 32, in resource "azurerm_mssql_managed_instance" "this":
-   ```
-
-3. This happens even though `storage_iops` is **not set** in the configuration.
-
-The same thing happens after `terraform import` of an existing non-Next-gen instance.
+This happens even though `storage_iops` is not set in the configuration. The same happens after `terraform import`.
 
 ## Why
 
-- Configurable IOPS only exists on Next-gen GP. For standard GP and Business Critical, Azure returns no IOPS value: `az sql mi show` reports `storageIops: null`.
-- When the provider reads the instance, it stores `storage_iops = 0` in Terraform state instead of leaving it empty.
-- The provider's own validation says `storage_iops` may only be set when `general_purpose_v2_enabled` is true. It sees `0`, treats it as set, and rejects the plan.
+- Configurable IOPS only exists on Next-gen GP. For standard GP and Business Critical, Azure returns no IOPS value (`az sql mi show` reports `storageIops: null`).
+- From 4.78.0, the provider stores `storage_iops = 0` in state when it reads such an instance, instead of leaving it empty.
+- Without `ignore_changes`, that 0 is harmless: the configuration value stays null and the provider's validation passes.
+- With `ignore_changes = [storage_iops]`, Terraform copies the prior state value (0) into the configuration before the provider plans. The provider's validation sees `storage_iops = 0` with `general_purpose_v2_enabled = false`, treats it as set, and rejects the plan.
 
-In short, the provider rejects a value it wrote itself. Azure is behaving correctly; the bug is in the provider.
-(The read-path explanation fits all the evidence below but hasn't been confirmed in the provider source.)
+So the provider rejects a value it wrote itself, but only when `ignore_changes` feeds it back. (This explanation fits every result below but hasn't been confirmed in the provider source.)
 
-`storage_iops` was added in 4.78.0 ([#32250](https://github.com/hashicorp/terraform-provider-azurerm/pull/32250)). 4.77.0 rejects the argument outright, so 4.78.0 is the earliest version that can be affected.
-
-## Why it matters
-
-To manage IOPS on Next-gen GP you need azurerm 4.78.0 or later. If the same Terraform configuration or state also manages existing standard GP or Business Critical instances, upgrading the provider can make `terraform plan` fail for those instances. That blocks every change in that configuration, not just changes to the MI.
-
-**Before upgrading azurerm past 4.77, run `terraform plan` against your existing non-Next-gen instances on the new version.**
+`storage_iops` was added in 4.78.0 ([#32250](https://github.com/hashicorp/terraform-provider-azurerm/pull/32250)). 4.77.0 rejects the argument, so a configuration written for 4.77.0 or earlier can't list it in `ignore_changes`.
 
 ## What we tested
 
-All tests in Central US, Terraform 1.12.2, using the `stacks/azurerm` configuration in this repo.
+Central US, Terraform 1.12.2.
 
-| Instance | How it got into state | Provider | plan after create | destroy |
+**Upgrade tests (s09 standard GP `GP_Gen5`, s10 Business Critical `BC_Gen5`).** Instance created with azurerm 4.77.0 from a configuration without `storage_iops`; the same configuration and state were then used with newer versions. Results were identical for both instance types:
+
+| Step | Provider | Result |
+|---|---|---|
+| plan | 4.77.0 | ✅ no changes |
+| plan (state from 4.77.0) | 4.78.0, 4.81.0, 5.0.0, 5.11.0, 5.12.0 | ✅ no changes on every version |
+| no-change `apply` (writes `storage_iops = 0` to state), then plan | 4.78.0, 5.11.0 | ✅ no changes |
+| plan, `storage_iops = null` in config, no `ignore_changes` | 5.11.0 | ✅ no changes |
+| plan, `ignore_changes` includes `storage_iops` | 5.11.0 | ❌ error above |
+| plan, `storage_iops = null` + `ignore_changes` includes `storage_iops` | 5.11.0 | ❌ error above |
+| destroy, no `ignore_changes`, state has `storage_iops = 0` | 5.11.0 | ✅ both (s09, s10) |
+
+**Earlier tests, with this repo's stack as it was then (`storage_iops = var.storage_iops` plus `ignore_changes = [..., storage_iops]`):**
+
+| Instance | How it got into state | Provider | plan | destroy |
 |---|---|---|---|---|
-| Business Critical, zone redundant (s05) | created by Terraform | 5.11.0 | ❌ error above | ❌ error above |
+| Business Critical, zone redundant (s05) | created by Terraform | 5.11.0 | ❌ | ❌ |
 | Business Critical, zone redundant | `terraform import` | 5.11.0 | ❌ | ❌ |
-| Business Critical (same instance, plan only) | state from 5.11.0 | 4.78.0, 4.81.0, 5.0.0, 5.12.0 | ❌ on every version | not run |
-| Standard GP, `GP_Gen5`, no zone redundancy (s07) | created by Terraform | 5.11.0 | ❌ | ❌ |
-| Next-gen GP (s01) | created by Terraform | 5.11.0 | ✅ no changes | ✅ |
-| Next-gen GP, zone redundant, via azapi (s04) | created by Terraform | azapi | ✅ no changes | ✅ |
+| Business Critical (same instance, plan only) | state from 5.11.0 | 4.78.0, 4.81.0, 5.0.0, 5.12.0 | ❌ | not run |
+| Standard GP (s07) | created by Terraform | 5.11.0 | ❌ | ❌ |
+| Next-gen GP (s01) | created by Terraform | 5.11.0 | ✅ | ✅ |
 
-Things we tried that **don't** help:
+Not tested: `terraform import` without `ignore_changes`; zone-redundant BC without `ignore_changes`; regions other than Central US.
 
-- `lifecycle { ignore_changes = [storage_iops] }` (the stack already has it)
-- Setting `storage_iops` to null in state: plan refreshes from Azure and fails again (tested on 4.78.0, 5.11.0 and 5.12.0)
-- Leaving `storage_iops` unset (`null`) in configuration
+## What to do
 
-Not tested: standard GP on provider versions other than 5.11.0; regions other than Central US.
+- **Don't list `storage_iops` in `ignore_changes`** for configurations that manage standard GP or Business Critical instances. Removing it is enough; `storage_iops` can stay unset or `null`.
+- Before upgrading azurerm past 4.77, run `terraform plan` against existing instances on the new version as a precaution.
 
-## Workaround
-
-You can still **destroy** an affected instance:
+**Destroying an affected instance without changing the configuration:**
 
 ```powershell
 # 1. Clear storage_iops in state
@@ -76,13 +77,6 @@ terraform destroy -refresh=false
 
 This worked for both the Business Critical and the standard GP instance. If an earlier delete of the instance is still running, the destroy can fail with a subnet error
 (`NetworkSecurityGroupCannotBeRemovedDueToNipOnSubnet`). Wait until the Managed Instance and its virtual cluster are gone from the resource group, then run `terraform destroy` again.
-
-We haven't found a workaround that lets you keep **managing** an affected instance (plan/apply) on 4.78.0 or later. Options until it's fixed:
-
-- Keep non-Next-gen instances in a separate configuration pinned to azurerm `< 4.78.0` (4.68.0+ still supports `general_purpose_v2_enabled`).
-- Manage Next-gen IOPS through `azapi` instead of azurerm's `storage_iops`.
-
-Neither option has been tested end to end here.
 
 ## Likely fix
 

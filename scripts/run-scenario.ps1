@@ -25,7 +25,7 @@ $scenarios = [ordered]@{
   s04 = @{ Stack = 'azapi';   File = 's04-azapi-nextgen-zr.tfvars';         Expect = 'plan OK (service decides on apply)' }
   s05 = @{ Stack = 'azurerm'; File = 's05-azurerm-bc-zr-baseline.tfvars';   Expect = 'plan OK' }
   s06 = @{ Stack = 'azapi';   File = 's06-azapi-nextgen-flexmem.tfvars';    Expect = 'plan OK (needs premium-series quota on apply)' }
-  s07 = @{ Stack = 'azurerm'; File = 's07-azurerm-standard-gp.tfvars';      Expect = 'plan OK (plan after create hits storage_iops bug)' }
+  s07 = @{ Stack = 'azurerm'; File = 's07-azurerm-standard-gp.tfvars';      Expect = 'plan OK (failed after create while the stack ignored storage_iops)' }
   s08 = @{ Stack = 'azapi';   File = 's08-azapi-nextgen-flexmem-swedencentral.tfvars'; Expect = 'plan OK (apply returned 500 InternalServerError in testing)' }
 }
 

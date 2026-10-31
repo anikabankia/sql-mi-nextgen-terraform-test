@@ -7,8 +7,9 @@ Sample Terraform that answers two questions:
 
 > [!WARNING]
 > **azurerm bug found during testing:** with azurerm 4.78.0 and later, standard General Purpose and Business Critical
-> Managed Instances can't be planned or destroyed after create or import (`storage_iops` is stored as 0 and fails the provider's own validation).
-> Next-gen GP is not affected. Details, evidence and workaround: [docs/azurerm-storage-iops-bug.md](docs/azurerm-storage-iops-bug.md).
+> Managed Instances can't be planned or destroyed **if the configuration lists `storage_iops` in `lifecycle.ignore_changes`**
+> (`storage_iops` is stored as 0 and `ignore_changes` feeds it back into the provider's own validation).
+> Without that line, upgrading the provider didn't break existing instances (s09, s10). Next-gen GP is not affected. Details, evidence and workaround: [docs/azurerm-storage-iops-bug.md](docs/azurerm-storage-iops-bug.md).
 > Reported upstream: [hashicorp/terraform-provider-azurerm#33760](https://github.com/hashicorp/terraform-provider-azurerm/issues/33760).
 
 The configurations were run in **Central US** (`centralus`) in October 2026 (s08 in Sweden Central) with Terraform 1.12.2, azurerm 5.11.0 and azapi 2.x.
@@ -25,7 +26,7 @@ The configurations were run in **Central US** (`centralus`) in October 2026 (s08
 | Zone redundancy | Next-gen GP with zone redundancy is supported by the service **in preview**. It needs Elastic SAN ZRS, so it's not available in every region with zone redundancy; Central US has it. **azurerm currently blocks this combination at plan time**, so deploy it with the **azapi** provider (scenario s04). |
 | Flexible memory | Not exposed by azurerm. The azapi stack can send `memorySizeInGB` (scenarios s06, s08), but this is **untested**: every create attempt, in Central US and in Sweden Central, failed with 500 InternalServerError, so no instance was ever created. |
 | Changing IOPS after create | Works in place, about 1–2 minutes per change, with and without zone redundancy. If your environment has an Azure Policy that requires Entra-only authentication, see [Entra-only authentication](#entra-only-authentication). |
-| Existing standard GP / BC instances | ⚠️ **azurerm 4.78.0+ can't plan or destroy non-Next-gen instances** after create or import. See [docs/azurerm-storage-iops-bug.md](docs/azurerm-storage-iops-bug.md). |
+| Existing standard GP / BC instances | Upgrading to azurerm 4.78.0+ worked for instances created with 4.77.0 (s09, s10). ⚠️ **Don't list `storage_iops` in `ignore_changes`**: with it, plan and destroy fail. See [docs/azurerm-storage-iops-bug.md](docs/azurerm-storage-iops-bug.md). |
 
 ## Results
 
@@ -35,10 +36,12 @@ The configurations were run in **Central US** (`centralus`) in October 2026 (s08
 | s02 | azurerm | BC_Gen5 + Next-gen | ❌ Plan fails, as expected: `general_purpose_v2_enabled cannot be set to true on Business Critical SKUs` |
 | s03 | azurerm | GP_Gen5 + Next-gen + zone redundant | ❌ Plan fails: `zone_redundant_enabled cannot be set to true when general_purpose_v2_enabled is true` |
 | s04 | azapi | GP_Gen5 + Next-gen + zone redundant | ✅ Create → plan (no changes) → IOPS 768 → 1500 → plan → destroy, all clean (preview), with zone-redundant backups |
-| s05 | azurerm | BC_Gen5 + zone redundant (no Next-gen) | ⚠️ Created, then plan and destroy fail: [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md) |
+| s05 | azurerm | BC_Gen5 + zone redundant (no Next-gen) | ⚠️ Created, then plan and destroy fail: [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md), triggered by `storage_iops` in the stack's `ignore_changes` at the time |
 | s06 | azapi | GP_G8IM + Next-gen + flexible memory (40 GB), Central US | ⏸️ Not tested: no premium-series quota; create attempts returned 500 InternalServerError |
-| s07 | azurerm | GP_Gen5, standard (no Next-gen) | ⚠️ Created, then plan and destroy fail: same [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md) |
+| s07 | azurerm | GP_Gen5, standard (no Next-gen) | ⚠️ Created, then plan and destroy fail: same [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md) (same `ignore_changes` trigger) |
 | s08 | azapi | GP_G8IM + Next-gen + flexible memory (40 GB), Sweden Central | ⏸️ Not tested: quota available, but every create attempt returned 500 InternalServerError (93 failures in the activity log; Terraform retried for ~7 hours); no instance was created |
+| s09 | azurerm | GP_Gen5, standard: provider upgrade | ✅ Created with 4.77.0; plan clean on 4.78.0, 4.81.0, 5.0.0, 5.11.0, 5.12.0, also after a no-change apply; destroy on 5.11.0 clean. ❌ Plan fails only when `storage_iops` is added to `ignore_changes` |
+| s10 | azurerm | BC_Gen5: provider upgrade | ✅ Same results as s09, including a clean destroy on 5.11.0. ❌ Plan fails only when `storage_iops` is added to `ignore_changes` |
 
 Provider version checks (`terraform validate`): azurerm 4.67.0 rejects `general_purpose_v2_enabled`, 4.68.0 accepts it; 4.77.0 rejects `storage_iops`, 4.78.0 accepts it.
 
@@ -46,10 +49,11 @@ Provider version checks (`terraform validate`): azurerm 4.67.0 rejects `general_
 
 - **Flexible memory** (`memory_size_in_gb`): create and later resize. Every create attempt returned 500 InternalServerError (s06, s08).
 - **IOPS updates through azurerm `storage_iops`**: every attempt was denied by an Entra-only Azure Policy (see [Entra-only authentication](#entra-only-authentication)). All IOPS changes above were made with the azapi PATCH.
-- **Standard GP on provider versions other than azurerm 5.11.0.**
-- **Upgrading the provider under existing, long-lived state.** Only fresh creates and imports were tested.
+- **This stack's IOPS PATCH flow since `storage_iops` was removed from `ignore_changes`.** s01 ran with it ignored; a plan after an azapi IOPS change hasn't been re-run with the current stack.
+- **`terraform import` and zone-redundant BC without `ignore_changes`.**
+- **Upgrading long-lived state.** s09/s10 upgraded state written by 4.77.0 minutes earlier, not state that went through many older provider versions.
 
-Create times in these runs: 2–2.5 hours for Next-gen GP and Business Critical, 7 minutes for standard GP. Destroy took about 20–25 minutes. Allow for that in pipeline timeouts.
+Create times in these runs: 2–2.5 hours for Next-gen GP and zone-redundant Business Critical, about 20 minutes for Business Critical without zone redundancy, 7–8 minutes for standard GP. Destroy took about 20–25 minutes. Allow for that in pipeline timeouts.
 
 ## Entra-only authentication
 
