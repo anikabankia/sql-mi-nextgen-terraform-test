@@ -11,7 +11,7 @@ Sample Terraform that answers two questions:
 > Next-gen GP is not affected. Details, evidence and workaround: [docs/azurerm-storage-iops-bug.md](docs/azurerm-storage-iops-bug.md).
 > Reported upstream: [hashicorp/terraform-provider-azurerm#33760](https://github.com/hashicorp/terraform-provider-azurerm/issues/33760).
 
-The configurations were run in **Central US** (`centralus`) in October 2026 with Terraform 1.12.2, azurerm 5.11.0 and azapi 2.x.
+The configurations were run in **Central US** (`centralus`) in October 2026 (s08 in Sweden Central) with Terraform 1.12.2, azurerm 5.11.0 and azapi 2.x.
 
 > **This is a validation sample, not a production module.** Each scenario creates its own resource group and VNet,
 > and two scenarios (s02, s03) are meant to fail. Use it to see what works, then copy the relevant pieces into your own code.
@@ -23,7 +23,7 @@ The configurations were run in **Central US** (`centralus`) in October 2026 with
 | Terraform support | **Yes.** Use `azurerm_mssql_managed_instance` with a `GP_*` SKU and `general_purpose_v2_enabled = true`. Next-gen isn't a separate SKU name. The argument is available from azurerm **4.68.0**, and `storage_iops` from **4.78.0**. Older provider versions can't deploy Next-gen. |
 | General Purpose vs. Business Critical | Next-gen is an upgrade to **General Purpose only**. There's no Next-gen Business Critical. azurerm rejects `BC_*` with `general_purpose_v2_enabled` at plan time. Billing still shows *General Purpose*. |
 | Zone redundancy | Next-gen GP with zone redundancy is supported by the service **in preview**. It needs Elastic SAN ZRS, so it's not available in every region with zone redundancy; Central US has it. **azurerm currently blocks this combination at plan time**, so deploy it with the **azapi** provider (scenario s04). |
-| Flexible memory | Not exposed by azurerm. The azapi stack can send `memorySizeInGB` (scenario s06), but this is **untested**: premium-series quota wasn't available. |
+| Flexible memory | Not exposed by azurerm. The azapi stack can send `memorySizeInGB` (scenarios s06, s08), but this is **untested**: every create attempt, in Central US and in Sweden Central, failed with 500 InternalServerError, so no instance was ever created. |
 | Changing IOPS after create | Works in place, about 1–2 minutes per change, with and without zone redundancy. If your environment has an Azure Policy that requires Entra-only authentication, see [Entra-only authentication](#entra-only-authentication). |
 | Existing standard GP / BC instances | ⚠️ **azurerm 4.78.0+ can't plan or destroy non-Next-gen instances** after create or import. See [docs/azurerm-storage-iops-bug.md](docs/azurerm-storage-iops-bug.md). |
 
@@ -36,10 +36,18 @@ The configurations were run in **Central US** (`centralus`) in October 2026 with
 | s03 | azurerm | GP_Gen5 + Next-gen + zone redundant | ❌ Plan fails: `zone_redundant_enabled cannot be set to true when general_purpose_v2_enabled is true` |
 | s04 | azapi | GP_Gen5 + Next-gen + zone redundant | ✅ Create → plan (no changes) → IOPS 768 → 1500 → plan → destroy, all clean (preview), with zone-redundant backups |
 | s05 | azurerm | BC_Gen5 + zone redundant (no Next-gen) | ⚠️ Created, then plan and destroy fail: [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md) |
-| s06 | azapi | GP_G8IM + Next-gen + flexible memory (40 GB) | ⏸️ Not tested: no premium-series quota; create attempts returned 500 InternalServerError |
+| s06 | azapi | GP_G8IM + Next-gen + flexible memory (40 GB), Central US | ⏸️ Not tested: no premium-series quota; create attempts returned 500 InternalServerError |
 | s07 | azurerm | GP_Gen5, standard (no Next-gen) | ⚠️ Created, then plan and destroy fail: same [azurerm `storage_iops` bug](docs/azurerm-storage-iops-bug.md) |
+| s08 | azapi | GP_G8IM + Next-gen + flexible memory (40 GB), Sweden Central | ⏸️ Not tested: quota available, but every create attempt returned 500 InternalServerError (93 failures in the activity log; Terraform retried for ~7 hours); no instance was created |
 
 Provider version checks (`terraform validate`): azurerm 4.67.0 rejects `general_purpose_v2_enabled`, 4.68.0 accepts it; 4.77.0 rejects `storage_iops`, 4.78.0 accepts it.
+
+### Not tested
+
+- **Flexible memory** (`memory_size_in_gb`): create and later resize. Every create attempt returned 500 InternalServerError (s06, s08).
+- **IOPS updates through azurerm `storage_iops`**: every attempt was denied by an Entra-only Azure Policy (see [Entra-only authentication](#entra-only-authentication)). All IOPS changes above were made with the azapi PATCH.
+- **Standard GP on provider versions other than azurerm 5.11.0.**
+- **Upgrading the provider under existing, long-lived state.** Only fresh creates and imports were tested.
 
 Create times in these runs: 2–2.5 hours for Next-gen GP and Business Critical, 7 minutes for standard GP. Destroy took about 20–25 minutes. Allow for that in pipeline timeouts.
 

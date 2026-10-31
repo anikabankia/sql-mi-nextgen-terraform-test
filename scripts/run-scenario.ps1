@@ -8,7 +8,7 @@
   ./scripts/run-scenario.ps1 -Scenario s01 -Action destroy
 #>
 param(
-  [ValidateSet('all', 's01', 's02', 's03', 's04', 's05', 's06', 's07')]
+  [ValidateSet('all', 's01', 's02', 's03', 's04', 's05', 's06', 's07', 's08')]
   [string]$Scenario = 'all',
   [ValidateSet('plan', 'apply', 'destroy')]
   [string]$Action = 'plan',
@@ -26,6 +26,7 @@ $scenarios = [ordered]@{
   s05 = @{ Stack = 'azurerm'; File = 's05-azurerm-bc-zr-baseline.tfvars';   Expect = 'plan OK' }
   s06 = @{ Stack = 'azapi';   File = 's06-azapi-nextgen-flexmem.tfvars';    Expect = 'plan OK (needs premium-series quota on apply)' }
   s07 = @{ Stack = 'azurerm'; File = 's07-azurerm-standard-gp.tfvars';      Expect = 'plan OK (plan after create hits storage_iops bug)' }
+  s08 = @{ Stack = 'azapi';   File = 's08-azapi-nextgen-flexmem-swedencentral.tfvars'; Expect = 'plan OK (apply returned 500 InternalServerError in testing)' }
 }
 
 if (-not $SubscriptionId) {
