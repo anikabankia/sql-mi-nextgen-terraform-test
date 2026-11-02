@@ -1,7 +1,7 @@
 # azurerm bug: `ignore_changes = [storage_iops]` breaks non-Next-gen Managed Instances
 
 **Affected:** `azurerm_mssql_managed_instance`, azurerm **4.78.0 and later** (tested through 5.12.0), **only when the configuration lists `storage_iops` in `lifecycle.ignore_changes`**
-**Affected instances:** standard General Purpose and Business Critical (anything with `general_purpose_v2_enabled = false`)
+**Affected instances:** standard General Purpose and Business Critical (`general_purpose_v2_enabled = false`; tested: `GP_Gen5`, `BC_Gen5`)
 **Not affected:** Next-gen General Purpose (`general_purpose_v2_enabled = true`), and configurations that don't ignore `storage_iops`
 **Status:** reported upstream as [hashicorp/terraform-provider-azurerm#33760](https://github.com/hashicorp/terraform-provider-azurerm/issues/33760)
 
@@ -10,13 +10,13 @@
 
 ## What happens
 
-With `storage_iops` in `ignore_changes`, a standard GP or Business Critical instance is created successfully, but every later `terraform plan` fails, and so does `terraform destroy`:
+With `storage_iops` in `ignore_changes`, a standard GP or Business Critical instance is created successfully, but every later `terraform plan` fails, and so does `terraform destroy` (destroy tried on 5.11.0 only):
 
 ```text
 Error: `storage_iops` can only be set when `general_purpose_v2_enabled` is `true`
 ```
 
-This happens even though `storage_iops` is not set in the configuration. The same happens after `terraform import`.
+This happens even though `storage_iops` is not set in the configuration. The same happens after `terraform import` (5.11.0, Business Critical).
 
 ## Why
 
