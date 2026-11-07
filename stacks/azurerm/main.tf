@@ -59,9 +59,9 @@ resource "azurerm_mssql_managed_instance" "this" {
 
   # azure_active_directory_administrator: any diff makes azurerm disable Entra-only auth first, which Azure
   # rejects (no SQL admin to fall back to). Import never reads it back, so it always diffs after import.
-  # Don't add storage_iops here: azurerm 4.78+ stores 0 for non-Next-gen instances and ignore_changes feeds that 0 back
-  # into its own validation, breaking plan/destroy (docs/azurerm-storage-iops-bug.md). With storage_iops left null,
-  # IOPS changed later through azapi_resource_action.iops below shouldn't show as a diff (not yet re-tested on Next-gen).
+  # storage_iops isn't listed here: on azurerm 4.78 through 5.12, that breaks plan/destroy for non-Next-gen instances
+  # (docs/azurerm-storage-iops-bug.md; fixed in 5.13). With storage_iops left null, an IOPS change through
+  # azapi_resource_action.iops below proposes no change to the instance, but the next plan reports it as changed outside Terraform.
   lifecycle {
     ignore_changes = [azure_active_directory_administrator]
   }
